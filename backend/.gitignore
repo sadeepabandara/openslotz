@@ -1,6 +1,3 @@
 node_modules
 .env
 .env.e2e
-.vscode
-.DS_Store
-dist
