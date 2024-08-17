@@ -9,18 +9,13 @@ import path from "path";
 
 mongoose.connect(process.env.MONGODB_CONNECTION_STRING as string);
 
-const FRONTEND_URL =
-  process.env.NODE_ENV === "production"
-    ? "https://openslotz.onrender.com"
-    : "http://localhost:5173";
-
 const app = express();
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
-    origin: FRONTEND_URL,
+    origin: process.env.FRONTEND_URL,
     credentials: true,
   }),
 );
