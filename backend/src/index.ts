@@ -9,17 +9,11 @@ import path from "path";
 
 mongoose.connect(process.env.MONGODB_CONNECTION_STRING as string);
 
-const corsOptions = {
-  origin: ["http://localhost:5173", "https://openslotz.onrender.com"], // Add your allowed origins here
-  methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
-  credentials: true,
-};
-
 const app = express();
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors(corsOptions));
+app.use(cors());
 
 app.use(express.static(path.join(__dirname, "../../frontend/dist")));
 
