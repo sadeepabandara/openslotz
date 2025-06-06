@@ -1,65 +1,88 @@
 pipeline {
     agent any
-
+    environment {
+        AWS_REGION = 'us-east-1'
+        S3_BUCKET = 'openslotz-deployments'
+        APP_NAME = 'openslotz'
+        DEPLOYMENT_GROUP = 'prod'
+    }
     stages {
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/sadeepabandara/openslotz.git'
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                dir('backend') {
-                    sh 'npm install'
-                }
-                dir('frontend') {
-                    sh 'npm install'
-                }
-            }
-        }
-
+        // Stage 1: Build
         stage('Build') {
             steps {
                 dir('frontend') {
+                    sh 'npm install'
                     sh 'npm run build'
+                    sh 'tar -czf frontend.tar.gz dist/'
+                }
+                dir('backend') {
+                    sh 'npm install --production'
+                    sh 'tar -czf backend.tar.gz .'
                 }
             }
         }
 
-        stage('Deploy to EC2') {
+        // Stage 2: Test
+        stage('Test') {
             steps {
-                sshPublisher(
-            publishers: [
-                sshPublisherDesc(
-                    configName: 'AWS EC2', // Must match your Jenkins SSH server config
-                    transfers: [
-                        // Deploy backend
-                        sshTransfer(
-                            sourceFiles: 'backend/**',
-                            removePrefix: 'backend',
-                            remoteDirectory: 'app/backend',
-                            execCommand: '''
-                                cd /home/ubuntu/app/backend
-                                npm install --production
-                                pm2 restart backend || pm2 start server.js --name "backend"
-                            '''
-                        ),
-                        // Deploy frontend
-                        sshTransfer(
-                            sourceFiles: 'frontend/dist/**',
-                            removePrefix: 'frontend/dist',
-                            remoteDirectory: 'app/frontend',
-                            execCommand: '''
-                                sudo rm -rf /var/www/html/*
-                                sudo cp -r /home/ubuntu/app/frontend/* /var/www/html/
-                                sudo systemctl restart nginx
-                            '''
-                        )
-                    ]
+                dir('backend') {
+                    sh 'npm test' // Ensure you have test scripts in package.json
+                }
+                dir('frontend') {
+                    sh 'npm test'
+                }
+            }
+        }
+
+        // Stage 3: Code Quality (SonarQube)
+        stage('Code Quality') {
+            steps {
+                withSonarQubeEnv('SonarQube-Server') {
+                    sh 'sonar-scanner -Dsonar.projectKey=your-app'
+                }
+            }
+        }
+
+        // Stage 4: Security (OWASP Scan)
+        stage('Security') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --format HTML', odcInstallation: 'OWASP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.html'
+            }
+        }
+
+        // Stage 5: Deploy to S3 & Trigger CodeDeploy
+        stage('Deploy') {
+            steps {
+                s3Upload(
+                    bucket: "${S3_BUCKET}",
+                    file: 'backend/backend.tar.gz',
+                    path: 'backend/backend.tar.gz'
                 )
-            ]
-        )
+                sh """
+                aws deploy create-deployment \
+                    --application-name ${APP_NAME} \
+                    --deployment-group-name ${DEPLOYMENT_GROUP} \
+                    --s3-location bucket=${S3_BUCKET},bundleType=tgz,key=backend/backend.tar.gz
+                """
+            }
+        }
+
+        // Stage 6: Release (Approval)
+        stage('Release') {
+            steps {
+                timeout(time: 1, unit: 'DAYS') {
+                    input message: 'Deploy to production?', ok: 'Confirm'
+                }
+            }
+        }
+
+        // Stage 7: Monitoring (New Relic)
+        stage('Monitoring') {
+            steps {
+                sh 'curl -X POST "https://api.newrelic.com/v2/applications/YOUR_APP_ID/deployments.json" \
+                    -H "Api-Key:YOUR_API_KEY" \
+                    -d "deployment[app_name]=${APP_NAME}"'
             }
         }
     }
