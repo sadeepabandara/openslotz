@@ -1,5 +1,9 @@
 pipeline {
     agent any
+    options {
+        failFast true
+        skipDefaultCheckout(true)
+    }
     environment {
         AWS_REGION = 'us-east-1'
         S3_BUCKET = 'openslotz-deployments'
@@ -7,7 +11,14 @@ pipeline {
         DEPLOYMENT_GROUP = 'prod'
     }
     stages {
-        // Stage 1: Build
+        // Stage 1: Checkout
+        stage('Checkout SCM') {
+            steps {
+                checkout scm
+            }
+        }
+
+        // Stage 2: Build
         stage('Build') {
             steps {
                 dir('frontend') {
@@ -17,25 +28,24 @@ pipeline {
                 }
                 dir('backend') {
                     sh 'npm install --production'
-                    sh 'tar --exclude="./node_modules" --exclude="./backend.tar.gz" --exclude="./.git" -czf backend.tar.gz .'
-
+                    // Create backend.tar.gz one level up to root workspace
+                    sh 'tar --exclude="./node_modules" --exclude="./.git" -czf ../backend.tar.gz .'
                 }
             }
         }
 
-        // Stage 2: Test
+        // Stage 3: Test
         stage('Test') {
             steps {
-                dir('backend') {
-                    sh 'npm test' // Ensure you have test scripts in package.json
-                }
-                dir('frontend') {
+                dir('e2e-tests') {
+                    sh 'npm ci'
+                    sh 'npx playwright install'
                     sh 'npm test'
                 }
             }
         }
 
-        // Stage 3: Code Quality (SonarQube)
+        // Stage 4: Code Quality (SonarQube)
         stage('Code Quality') {
             steps {
                 withSonarQubeEnv('SonarQube-Server') {
@@ -44,7 +54,7 @@ pipeline {
             }
         }
 
-        // Stage 4: Security (OWASP Scan)
+        // Stage 5: Security (OWASP Scan)
         stage('Security') {
             steps {
                 dependencyCheck additionalArguments: '--scan ./ --format HTML', odcInstallation: 'OWASP'
@@ -52,12 +62,12 @@ pipeline {
             }
         }
 
-        // Stage 5: Deploy to S3 & Trigger CodeDeploy
+        // Stage 6: Deploy to S3 & Trigger CodeDeploy
         stage('Deploy') {
             steps {
                 s3Upload(
                     bucket: "${S3_BUCKET}",
-                    includePathPattern: 'backend/backend.tar.gz',
+                    includePathPattern: 'backend.tar.gz',
                     storageClass: 'STANDARD',
                     acl: 'BucketOwnerFullControl'
                 )
@@ -65,12 +75,12 @@ pipeline {
                 aws deploy create-deployment \
                     --application-name ${APP_NAME} \
                     --deployment-group-name ${DEPLOYMENT_GROUP} \
-                    --s3-location bucket=${S3_BUCKET},bundleType=tgz,key=backend/backend.tar.gz
+                    --s3-location bucket=${S3_BUCKET},bundleType=tgz,key=backend.tar.gz
                 """
             }
         }
 
-        // Stage 6: Release (Approval)
+        // Stage 7: Release (Approval)
         stage('Release') {
             steps {
                 timeout(time: 1, unit: 'DAYS') {
@@ -79,12 +89,14 @@ pipeline {
             }
         }
 
-        // Stage 7: Monitoring (New Relic)
+        // Stage 8: Monitoring (New Relic)
         stage('Monitoring') {
             steps {
-                sh 'curl -X POST "https://api.newrelic.com/v2/applications/YOUR_APP_ID/deployments.json" \
+                sh '''
+                curl -X POST "https://api.newrelic.com/v2/applications/YOUR_APP_ID/deployments.json" \
                     -H "Api-Key:YOUR_API_KEY" \
-                    -d "deployment[app_name]=${APP_NAME}"'
+                    -d "deployment[app_name]=${APP_NAME}"
+                '''
             }
         }
     }
