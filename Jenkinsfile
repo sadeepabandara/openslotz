@@ -17,7 +17,8 @@ pipeline {
                 }
                 dir('backend') {
                     sh 'npm install --production'
-                    sh 'tar -czf backend.tar.gz .'
+                    sh 'tar --exclude="./node_modules" --exclude="./backend.tar.gz" --exclude="./.git" -czf backend.tar.gz .'
+
                 }
             }
         }
@@ -56,8 +57,9 @@ pipeline {
             steps {
                 s3Upload(
                     bucket: "${S3_BUCKET}",
-                    file: 'backend/backend.tar.gz',
-                    path: 'backend/backend.tar.gz'
+                    includePathPattern: 'backend/backend.tar.gz',
+                    storageClass: 'STANDARD',
+                    acl: 'BucketOwnerFullControl'
                 )
                 sh """
                 aws deploy create-deployment \
