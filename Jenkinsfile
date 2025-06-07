@@ -1,9 +1,5 @@
 pipeline {
     agent any
-    options {
-        failFast true
-        skipDefaultCheckout(true)
-    }
     environment {
         AWS_REGION = 'us-east-1'
         S3_BUCKET = 'openslotz-deployments'
